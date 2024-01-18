@@ -9,7 +9,7 @@ begin
 
     # Define our constant parameters
     Δt = 1e0
-    num_time_steps = 10^3
+    num_time_steps = 2^9
     max_position = 1e4
     max_velocity = 1e1
     max_effort = 1e-1
@@ -40,7 +40,7 @@ begin
     @objective(model, Min, sum((effort[:, :]).^2))
 
     # Initial conditions:
-    @constraint(model, position[:, begin] .== [5e1, 5e1, 5e1])
+    @constraint(model, position[:, begin] .== [1e3, 1e3, 1e3])
     @constraint(model, velocity[:, begin] .== [0e0, 0e0, 0e0])
 
     # Final conditions:
@@ -53,8 +53,8 @@ using GLMakie
 let
     fig = Figure(size=(1920, 1080))
 
-    ax1 = LScene(fig[1, 1], scenekw = (backgroundcolor=RGBf(0.3,0.3,0.1), clear=true))
-    # ax1 = Axis3(fig[1, 1], perspectiveness=0.5, xlabel="r-bar", ylabel="v-bar", zlabel="h-bar")
+    #ax1 = LScene(fig[1, 1], scenekw = (backgroundcolor=RGBf(0.3,0.3,0.1), clear=true))
+    ax1 = Axis3(fig[1, 1], perspectiveness=0.5, xlabel="r-bar", ylabel="v-bar", zlabel="h-bar")
 
     scatter!(ax1, [0,0,0]'; label="Target")
     scatter!(ax1, value.(position[:,begin])'; label="Chaser")
@@ -65,6 +65,10 @@ let
             arrowsize=5e-2, lengthscale=1e4, colormap=:thermal,
             arrowcolor=strength, linecolor=strength)
     axislegend(ax1)
+
+    ax2 = Axis(fig[2, 1]; ylabel="ΔV [m/s]")
+    JuMP.value.(effort) |> x -> series!(ax2, x; labels=["r" "v" "h"])
+    axislegend(ax2)
     @info value.(effort) .|> abs |> sum
     fig
 end

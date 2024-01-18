@@ -71,7 +71,7 @@ end
 
 begin
     epc0 = Epoch(2020, 1, 1, 0, 0, 0, 0.0)
-    oe = [R_EARTH + 400e3, 0.0, 0.0, 0.0, 0.0, 0.0]
+    oe = [R_EARTH + 650e3, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     params = (dt=10.0, area_drag=1e0, coef_drag=1,
         area_srp=1e0, coef_srp=1,
@@ -81,7 +81,7 @@ begin
         relativity=false)
     ecit = sOSCtoCART(oe, use_degrees=true)
     orbt = EarthInertialState(epc0, ecit; params...)
-    ecic = ecit - [5e1, 5e1, 5e1, 0e1, 0e1, 0e1]
+    ecic = ecit - [1e3, 1e3, 1e3, 0e1, 0e1, 0e1]
     orbc = EarthInertialState(epc0, ecic; params...)
 
     function simStep!(orbc, orbt, dt=10.0) # Simulate both sats ahead by dt
@@ -144,7 +144,8 @@ let orbc = orbc, orbt = orbt
     axislegend(ax)
     axislegend(ax2)
 
-    text!(0,0,text=string("ΔV = ", round(totalFiringTime;digits=2), "m/s"))
+    #text!(0,0,text=string("ΔV = ", round(totalFiringTime;digits=2), "m/s"))
+    @info string("ΔV = ", round(totalFiringTime;digits=2), "m/s")
 
     f
 end

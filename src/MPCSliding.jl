@@ -87,7 +87,7 @@ end
 
 begin
     epc0 = Epoch(2020, 1, 1, 0, 0, 0, 0.0)
-    oe = [R_EARTH + 400e3, 0.0, 0.0, 0.0, 0.0, 0.0]
+    oe = [R_EARTH + 650e3, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     params = (dt=1e0, area_drag=1e0, coef_drag=1e0,
         area_srp=1e0, coef_srp=1e0,
@@ -97,7 +97,7 @@ begin
         relativity=false)
     ecit = sOSCtoCART(oe, use_degrees=true)
     orbt = EarthInertialState(epc0, ecit; params...)
-    ecic = ecit - [5e1, 5e1, 5e1, 0e1, 0e1, 0e1]
+    ecic = ecit - [1e3, 1e3, 1e3, 0e1, 0e1, 0e1]
     orbc = EarthInertialState(epc0, ecic; params...)
 
     function simStep!(orbc, orbt, dt=1.0) # Simulate both sats ahead by dt
@@ -121,12 +121,12 @@ let orbc = orbc, orbt = orbt
     ########################################
     # Simulation Loop
     ########################################
-    for i = 1:2^11
+    for i = 1:2^9
         # Generate Control input
         R = ECItoLVLH(orbt.x)
         lvlhc = -[R * (orbt.x-orbc.x)[1:3]; R * (orbt.x-orbc.x)[4:6]]
         lvlht = zeros(6)
-        u = mpcGetEffort(lvlhc, lvlht-[20,20,0,0,0,0])
+        u = mpcGetEffort(lvlhc, lvlht-[0,10,0,0,0,0])
         u = inv(R) * u
         orbc.x[4:6] += u
         totalimpulse += norm(u)
