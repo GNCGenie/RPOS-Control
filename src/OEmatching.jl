@@ -211,7 +211,8 @@ function ComputeForceDirectionFireTime(m::Manoeuver)
         Perturbation = Perturbation
 
         priority = Perror #|> x->(x/maximum(x)).^Inf
-        priority[[3,4,5,6]] .= 0
+        priority[[3,4]] .= 0e-3 # i and ω
+        priority[[5,6]] .= [0e-3,0e-2] # Ω and θ
         DiffDirection = OEDiff .* priority
 
         return -(Perturbation' * DiffDirection)
@@ -223,7 +224,7 @@ function ComputeForceDirectionFireTime(m::Manoeuver)
     # Find thruster fire time in seconds
     t = Perror * norm(Δoe(m.oeᵣ, F, 1)) / norm(MaxΔOE(m.oeᵣ)) |> norm
 
-    pow = 1e0
+    pow = 1e-1
     return (F, ((((t + pow) / pow)^pow) - 1) / pow)
 end
 
@@ -236,7 +237,7 @@ function LVLH2ECI(u, eci)
 end
 
 # ╔═╡ 4a1fb6d9-25fa-4320-8d79-b27bb6ded0c3
-let epi = Epoch(2020, 1, 1), days = 10, epf = epi + 60
+let epi = Epoch(2020, 1, 1), days = 2, epf = epi + 60
 
     # For ground based manoeuvres
     currentState = [R_EARTH + 500e3, 1e-4, π / 2, π / 3, π / 4, π / 3]
@@ -250,7 +251,8 @@ let epi = Epoch(2020, 1, 1), days = 10, epf = epi + 60
     impulses = floor(Int, (days * 86400) / (epf - epi))
     impulseGiven = Matrix{Float64}(undef, impulses, 3)
     impulseTime = Matrix{Float64}(undef, impulses, 1)
-    diff = Matrix{Float64}(undef, impulses, 6)
+    c_OEs = Matrix{Float64}(undef, impulses, 6)
+    t_OEs = Matrix{Float64}(undef, impulses, 6)
 
     satMass = 1 # kg
     thruster = 1 # N
@@ -272,7 +274,10 @@ let epi = Epoch(2020, 1, 1), days = 10, epf = epi + 60
 
     for i = 1:impulses
         oeᵣ = OE(sCARTtoOSC(eci)) # Real OEs
+        c_OEs[i,:] = collect(oeᵣ)
         oeₜ = OE(sCARTtoOSC(ecit)) # Target OEs
+        t_OEs[i,:] = collect(oeₜ)
+
         F, firingTime = ComputeForceDirectionFireTime(Manoeuver(oeᵣ, oeₜ))
         firingTime = isnan(firingTime) ? Inf : firingTime
         firingTime = min(firingTime, 1) # Maximum duration of fire is 1 sec
@@ -281,7 +286,6 @@ let epi = Epoch(2020, 1, 1), days = 10, epf = epi + 60
 
         impulseGiven[i, :] = F #LVLH Frame
         impulseTime[i] = firingTime
-        diff[i, :] = (oeₜ - oeᵣ)
 
         step!(currentOrbit, dt)
         eci = currentOrbit.x
@@ -289,6 +293,8 @@ let epi = Epoch(2020, 1, 1), days = 10, epf = epi + 60
         ecit = targetOrbit.x
     end
     @info "Total time fired" sum(impulseTime)
+    diff = Matrix{Float64}(undef, impulses, 6)
+    diff = t_OEs - c_OEs
 
     dayRange = range(0, days, impulses)
     fig = Figure(size=(900, 900))
@@ -326,6 +332,8 @@ let epi = Epoch(2020, 1, 1), days = 10, epf = epi + 60
     lines!(t, dayRange, impulseTime[:], label="Firing Time", color=RGBAf(1, 0.3, 0.3, 0.5))
     axislegend(v, position=:rt)
     axislegend(t, position=:rb)
+    linkxaxes!(v,t)
+    linkyaxes!(v,t)
     #    text!(v, 0, 0,
     #	  text = "Firing interval=1m\nFiring Time Limit=1s\nSatMass=$satMass kg\nT_Str=$thruster N",
     #	  align = (:left, :bottom))
