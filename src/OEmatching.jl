@@ -322,7 +322,7 @@ let epi = Epoch(2020, 1, 1), days = 2, epf = epi + 60
     axislegend(deg, position=:lt)
 
     v = Axis(fig[3, 1],
-        ylabel="ΔV Magnitude", xlabel="Days",
+        ylabel="ΔV Direction", xlabel="Days",
         title="Impulse Magnitude and Direction")
     t = Axis(fig[3, 1],
         ylabel="Firing Time [s]", yaxisposition=:right)
@@ -332,8 +332,11 @@ let epi = Epoch(2020, 1, 1), days = 2, epf = epi + 60
     lines!(t, dayRange, impulseTime[:], label="Firing Time", color=RGBAf(1, 0.3, 0.3, 0.5))
     axislegend(v, position=:rt)
     axislegend(t, position=:rb)
-    linkxaxes!(v,t)
     linkyaxes!(v,t)
+    linkxaxes!(a,e)
+    linkxaxes!(a,v)
+    linkxaxes!(a,t)
+    linkxaxes!(a,deg)
     #    text!(v, 0, 0,
     #	  text = "Firing interval=1m\nFiring Time Limit=1s\nSatMass=$satMass kg\nT_Str=$thruster N",
     #	  align = (:left, :bottom))

@@ -11,15 +11,20 @@ function ECItoLVLH(state)
     v = state[4:6]
 
     ir = normalize(r)
-    ih = normalize(r × v)
-    iv = normalize(ih × ir)
+    ih = normalize(r × v) |> x->((!isnan).(x)).*x
+    iv = normalize(ih × ir) |> x->((!isnan).(x)).*x
     R = [ir iv ih]
-    return R
     return [R zeros(3, 3)
-        zeros(3, 3) R]
+            zeros(3, 3) R]
 end
 
 function mpcGetEffort(initState::Vector, targetState::Vector)
+
+    R_Earth = 6.3781363e6
+    GM_Earth = 3.986004415e14
+    a = R_Earth + 650e3
+    n = √(GM_Earth / a^3)
+
     rel_pos = initState[1:3] - targetState[1:3] |> norm
     rel_vel = initState[4:6] - targetState[4:6] |> norm
 
@@ -27,23 +32,11 @@ function mpcGetEffort(initState::Vector, targetState::Vector)
     set_silent(model)
 
     # Define our constant parameters
-    num_time_steps = 2
+    num_time_steps = 5
     Δt = 1e0
     max_position = 1e4
     max_effort = 1e-1
-
-#    sat(x) = begin
-#        clamp(x, -one(x), one(x))
-#    end
-#    λ = 1e-0
-#    k = √(max_effort/λ)
-#    σ = rel_pos + (max(abs(rel_vel), k)*rel_vel)/(2*max_effort) + 3/(2*λ)*sat(rel_vel/k)
     max_velocity = sqrt(rel_pos*max_effort)/(Δt*num_time_steps) + 1e-1
-
-    R_Earth = 6.3781363e6
-    GM_Earth = 3.986004415e14
-    a = R_Earth + 650e3
-    n = √(GM_Earth / a^3)
 
     # Define our decision variables
     @variables model begin
@@ -58,27 +51,30 @@ function mpcGetEffort(initState::Vector, targetState::Vector)
 
     # Add dynamics constraints
     @constraint(model, [i = 2:num_time_steps],
-        velocity[1, i] == velocity[1, i-1] + 3 * n^2 * position[1, i-1] + 2 * n * velocity[2, i-1]
-        + effort[1, i-1] * Δt
-    )
+                velocity[1, i] == velocity[1, i-1] + 3 * n^2 * position[1, i-1] + 2 * n * velocity[2, i-1]
+                + effort[1, i-1] * Δt
+               )
     @constraint(model, [i = 2:num_time_steps],
-        velocity[2, i] == velocity[2, i-1] - 2 * n * velocity[1, i-1]
-        + effort[2, i-1] * Δt
-    )
+                velocity[2, i] == velocity[2, i-1] - 2 * n * velocity[1, i-1]
+                + effort[2, i-1] * Δt
+               )
     @constraint(model, [i = 2:num_time_steps],
-        velocity[3, i] == velocity[3, i-1] - n^2 * position[3, i-1]
-        + effort[3, i-1] * Δt
-    )
+                velocity[3, i] == velocity[3, i-1] - n^2 * position[3, i-1]
+                + effort[3, i-1] * Δt
+               )
     @constraint(model, [i = 2:num_time_steps, j = 1:3],
-        position[j, i] == position[j, i-1] + velocity[j, i-1] * Δt
-        + effort[j, i-1] * Δt^2 / 2
-    )
+                position[j, i] == position[j, i-1] + velocity[j, i-1] * Δt
+                + effort[j, i-1] * Δt^2 / 2
+               )
+    @constraint(model, [i = 2:num_time_steps, j = 1:3],
+                effort[j, i] .== effort[j, 1]
+                )
 
     # Cost function: minimize final position and final velocity
     @objective(model, Min,
-        sum((position[:, end] - targetState[1:3]) .^ 2) +
-        sum((velocity[:, end] - targetState[4:6]) .^ 2)
-    )
+               sum((position[:, end] - targetState[1:3]) .^ 2)
+               + sum((velocity[:, end] - targetState[4:6]) .^ 2)
+              )
 
     JuMP.optimize!(model)
     results = JuMP.value.(effort)
@@ -90,11 +86,11 @@ begin
     oe = [R_EARTH + 650e3, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     params = (dt=1e0, area_drag=1e0, coef_drag=1e0,
-        area_srp=1e0, coef_srp=1e0,
-        mass=100, n_grav=2, m_grav=2,
-        drag=true, srp=true,
-        moon=true, sun=true,
-        relativity=false)
+              area_srp=1e0, coef_srp=1e0,
+              mass=100, n_grav=9, m_grav=9,
+              drag=false, srp=false,
+              moon=false, sun=false,
+              relativity=false)
     ecit = sOSCtoCART(oe, use_degrees=true)
     orbt = EarthInertialState(epc0, ecit; params...)
     ecic = ecit - [1e3, 1e3, 1e3, 0e1, 0e1, 0e1]
@@ -115,27 +111,26 @@ let orbc = orbc, orbt = orbt
     trt = Vector{Vector{Float64}}(undef, 0)
     effort = Vector{Vector{Float64}}(undef, 0)
     totalimpulse = 0.0
-    push!(trc, orbc.x)
-    push!(trt, orbt.x)
 
     ########################################
     # Simulation Loop
     ########################################
-    for i = 1:2^9
+    num_time_steps = 2^10
+    for i = 1:num_time_steps
         # Generate Control input
-        R = ECItoLVLH(orbt.x)
-        lvlhc = -[R * (orbt.x-orbc.x)[1:3]; R * (orbt.x-orbc.x)[4:6]]
-        lvlht = zeros(6)
-        u = mpcGetEffort(lvlhc, lvlht-[0,10,0,0,0,0])
-        u = inv(R) * u
-        orbc.x[4:6] += u
+        R = ECItoLVLH(orbt.x) # 6x6 Matrix for mapping ECI->LVLH
+        lvlhc = -R * (orbt.x-orbc.x) # Position of chaser w.r.t. target in LVLH
+        lvlht = zeros(6) # Target is always at origin
+        u = mpcGetEffort(lvlhc, lvlht-[0,10,0,0,0,0]) # Returns impulse in LVLH Frame
+        u = inv(R[1:3,1:3]) * u # Convert LVLH to ECI for simulation
+        orbc.x[4:6] += u # Add impulse velocity to simulation velocity
         totalimpulse += norm(u)
+        push!(effort, u)
 
         # Simulate both satellites
         orbc, orbt = simStep!(orbc, orbt, timeStep)
         push!(trc, orbc.x)
         push!(trt, orbt.x)
-        push!(effort, u)
     end
 
     ########################################
@@ -143,26 +138,27 @@ let orbc = orbc, orbt = orbt
     ########################################
     f = Figure(; size=(900, 1200))
 
-    ax = Axis3(f[:, :], perspectiveness=0.3, xlabel="x(ECI)", ylabel="y(ECI)", zlabel="z(ECI)")
+    ax = Axis3(f[:, :], perspectiveness=0.3, xlabel="x(LVLH) [m]", ylabel="y(LVLH) [m]", zlabel="z(LVLH) [m]")
     scatter!(ax, (trt[begin]-trc[begin])[1:3]...; label="Chaser",)
     scatter!(ax, zeros(3)...; label="Target")
-    [Point3((t-c)[1:3]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax, x; color=range(0, 1, length(x)))
+    [Point3((ECItoLVLH(t)*(t-c))[1:3]) for (t,c) in zip(trt,trc)] |> x -> lines!(ax, x; color=range(0, 1, length(x)))
     axislegend(ax)
 
-    ax2 = Axis(f[2, 1], xlabel="time", ylabel="dist wrt origin")
-    ax2r = Axis(f[2, 1], xlabel="time", ylabel="vel wrt origin", yaxisposition=:right)
-    [norm((t-c)[1:3]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax2, x; color=range(0, 1, length(x)))
-    [norm((t-c)[4:6]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax2r, x; colormap=:thermal, color=range(0, 1, length(x)))
-    #    axislegend(ax2)
-    #    axislegend(ax2r)
+    min_range = range(0, num_time_steps/60, num_time_steps)
+    ax2 = Axis(f[2, 1], xlabel="Minutes", ylabel="Distance [m]")
+    ax2r = Axis(f[2, 1], xlabel="Minutes", ylabel="Velocity [m]", yaxisposition=:right)
+    [norm((t-c)[1:3]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax2, min_range, x; color=:red, label="position")
+    [norm((t-c)[4:6]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax2r, min_range, x; color=:green, label="velocity")
+    axislegend(ax2, position=:lt)
+    axislegend(ax2r, position=:rt)
+    linkxaxes!(ax2, ax2r)
+    linkyaxes!(ax2, ax2r)
 
     ax3 = Axis(f[3, 1])
-    reduce(hcat, effort) |> x -> series!(ax3, x; labels=["r" "v" "h"])
+    reduce(hcat, effort) |> x -> series!(ax3, min_range, x; labels=["r" "v" "h"])
     axislegend(ax3)
-
     linkxaxes!(ax2, ax3)
-    linkxaxes!(ax2, ax2r)
 
-    @info totalimpulse
+    @info "Total impulse used" totalimpulse
     f
 end

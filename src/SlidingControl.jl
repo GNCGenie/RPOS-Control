@@ -13,7 +13,7 @@ function ECItoLVLH(state)
     iv = ih × ir |> x -> x / norm(x)
     T = [ir iv ih]
     return [T zeros(3, 3)
-        zeros(3, 3) T]
+            zeros(3, 3) T]
 end
 
 begin
@@ -74,11 +74,11 @@ begin
     oe = [R_EARTH + 650e3, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     params = (dt=10.0, area_drag=1e0, coef_drag=1,
-        area_srp=1e0, coef_srp=1,
-        mass=100, n_grav=10, m_grav=10,
-        drag=false, srp=false,
-        moon=false, sun=false,
-        relativity=false)
+              area_srp=1e0, coef_srp=1,
+              mass=100, n_grav=10, m_grav=10,
+              drag=false, srp=false,
+              moon=false, sun=false,
+              relativity=false)
     ecit = sOSCtoCART(oe, use_degrees=true)
     orbt = EarthInertialState(epc0, ecit; params...)
     ecic = ecit - [1e3, 1e3, 1e3, 0e1, 0e1, 0e1]
@@ -103,13 +103,12 @@ let orbc = orbc, orbt = orbt
     trt = Vector{Vector{Float64}}(undef, 0)
     effort = Vector{Vector{Float64}}(undef, 0)
     totalFiringTime = 0.0
-    push!(trc, ECItoLVLH(orbt.x) * orbc.x)
-    push!(trt, ECItoLVLH(orbt.x) * orbt.x)
 
     ########################################
     # Simulation Loop
     ########################################
-    for i = 1:2^13
+    num_time_steps = 2^10
+    for i = 1:num_time_steps
         # Generate Control input
         states = genStates(orbc, orbt)
         u = map(state -> limiter(state, 0.0)[2], states)
@@ -133,13 +132,14 @@ let orbc = orbc, orbt = orbt
     # Printing utility for simulation
     ########################################
     f = Figure(; size=(900, 1200))
-    ax = Axis3(f[:, :], perspectiveness=0.3, xlabel="r-bar", ylabel="v-bar", zlabel="h-bar", title="Sliding Control")
+    ax = Axis3(f[:, :], perspectiveness=0.3, xlabel="x(LVLH) [m]", ylabel="y(LVLH) [m]", zlabel="z(LVLH) [m]")
     scatter!(ax, (trt[begin]-trc[begin])[1:3]...; label="Chaser",)
     scatter!(ax, zeros(3)...; label="Target")
     [Point3((t-c)[1:3]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax, x; color=range(0, 1, length(x)))
 
-    ax2 = Axis(f[2, 1])
-    reduce(hcat, effort) |> x -> series!(ax2, x; labels=["r" "v" "h"])
+    min_range = range(0, length(trc)/60, length(trc))
+    ax2 = Axis(f[2, 1], ylabel="Control Input", xlabel="Minutes")
+    reduce(hcat, effort) |> x -> series!(ax2, min_range, x; labels=["r" "v" "h"])
 
     axislegend(ax)
     axislegend(ax2)

@@ -6,32 +6,27 @@ end
 
 begin
     model = Model(Ipopt.Optimizer)
+
+    # Define our constant parameters
+    Δt = 1e0
+    num_time_steps = 2^9
+    max_effort = 1e-1
+
     R_Earth = 6.3781363e6
     GM_Earth = 3.986004415e14
     a = R_Earth + 650e3
     n = √(GM_Earth/a^3)
 
-    # Define our constant parameters
-    Δt = 1e0
-    num_time_steps = 2^10
-    max_position = 1e4
-    max_velocity = 1e1
-    max_effort = 1e-1
-
     # Define our decision variables
     @variables model begin
-        -max_position <= position[1:3, 1:num_time_steps] <= max_position
-        -max_velocity <= velocity[1:3, 1:num_time_steps] <= max_velocity
+        position[1:3, 1:num_time_steps]
+        velocity[1:3, 1:num_time_steps]
         -max_effort <= effort[1:3, 1:num_time_steps] <= max_effort
     end
 
     # Add dynamics constraints
-    @constraint(model, [i = 2:num_time_steps],
-                velocity[1, i] == velocity[1, i-1] + 3*n^2*position[1,i-1] + 2*n*velocity[2,i-1] + effort[1, i-1] * Δt)
-    @constraint(model, [i = 2:num_time_steps],
-                velocity[2, i] == velocity[2, i-1] - 2*n*velocity[1,i-1] + effort[2, i-1] * Δt)
-    @constraint(model, [i = 2:num_time_steps],
-                velocity[3, i] == velocity[3, i-1] - n^2*position[3,i-1] + effort[3, i-1] * Δt)
+    @constraint(model, [i = 2:num_time_steps, j = 1:3],
+                velocity[j, i] == velocity[j, i-1] + (-GM_Earth*position[j,i-1]*Δt)/(sum((position[:,i-1]).^2)) + effort[j, i-1] * Δt)
     @constraint(model, [i = 2:num_time_steps, j = 1:3],
                 position[j, i] == position[j, i-1] + velocity[j, i-1] * Δt + effort[j, i-1] * Δt^2 / 2)
 
@@ -52,7 +47,8 @@ using GLMakie
 let
     fig = Figure(size=(1920, 1080))
 
-    ax1 = Axis3(fig[:, :], perspectiveness=0.3, xlabel="x(LVLH) [m]", ylabel="y(LVLH) [m]", zlabel="z(LVLH) [m]")
+    #ax1 = LScene(fig[1, 1], scenekw = (backgroundcolor=RGBf(0.3,0.3,0.1), clear=true))
+    ax1 = Axis3(fig[1, 1], perspectiveness=0.5, xlabel="r-bar", ylabel="v-bar", zlabel="h-bar")
 
     scatter!(ax1, [0,0,0]'; label="Target")
     scatter!(ax1, value.(position[:,begin])'; label="Chaser")
@@ -64,9 +60,8 @@ let
             arrowcolor=strength, linecolor=strength)
     axislegend(ax1)
 
-    min_range = range(0, num_time_steps/60, num_time_steps)
-    ax2 = Axis(fig[2, 1]; ylabel="ΔV [m/s]", xlabel="Minutes")
-    JuMP.value.(effort) |> x -> series!(ax2, min_range, x; labels=["r" "v" "h"])
+    ax2 = Axis(fig[2, 1]; ylabel="ΔV [m/s]")
+    JuMP.value.(effort) |> x -> series!(ax2, x; labels=["r" "v" "h"])
     axislegend(ax2)
     @info value.(effort) .|> abs |> sum
     fig
