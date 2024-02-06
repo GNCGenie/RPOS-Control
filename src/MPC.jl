@@ -32,11 +32,12 @@ function mpcGetEffort(initState::Vector, targetState::Vector)
     set_silent(model)
 
     # Define our constant parameters
-    num_time_steps = 5
-    Δt = 1e0
+    num_time_steps = 10
     max_position = 1e4
     max_effort = 1e-1
-    max_velocity = min(5, sqrt(rel_pos*max_effort)/(Δt*num_time_steps)) + 1e0
+    max_velocity = min(sqrt(rel_pos*max_effort), 5) + 1e-1
+    Δt = rel_pos/(rel_vel+max_effort)
+    Δt /= num_time_steps
 
     # Define our decision variables
     @variables model begin
@@ -64,11 +65,7 @@ function mpcGetEffort(initState::Vector, targetState::Vector)
                )
     @constraint(model, [i = 2:num_time_steps, j = 1:3],
                 position[j, i] == position[j, i-1] + velocity[j, i-1] * Δt
-#                + effort[j, i-1] * Δt^2 / 2
                )
-#    @constraint(model, [i = 2:num_time_steps, j = 1:3],
-#                sum((position[j,i]).^2) >= 50
-#               )
 #    @constraint(model, [i = 2:num_time_steps, j = 1:3],
 #                effort[j, i] .== effort[j, 1]
 #                )
@@ -99,7 +96,7 @@ begin
               relativity=false)
     ecit = sOSCtoCART(oe, use_degrees=true)
     orbt = EarthInertialState(epc0, ecit; params...)
-    ecic = ecit - [1e2, 0e3, 0e3, 0e1, 0e1, 0e1]
+    ecic = ecit - [1e3, 1e3, 1e3, 0e1, 0e1, 0e1]
     orbc = EarthInertialState(epc0, ecic; params...)
 
     function simStep!(orbc, orbt, dt=1.0) # Simulate both sats ahead by dt
@@ -121,13 +118,13 @@ let orbc = orbc, orbt = orbt
     ########################################
     # Simulation Loop
     ########################################
-    num_time_steps = 2^10
+    num_time_steps = 2^11
     for i = 1:num_time_steps
         # Generate Control input
         R = ECItoLVLH(orbt.x) # 6x6 Matrix for mapping ECI->LVLH
         lvlhc = -R * (orbt.x-orbc.x) # Position of chaser w.r.t. target in LVLH
         lvlht = zeros(6) # Target is always at origin
-        u = mpcGetEffort(lvlhc, lvlht-[0,2.5e3,0,0,0,0]) # Returns impulse in LVLH Frame
+        u = mpcGetEffort(lvlhc, lvlht-[0,50,0,0,0,0]) # Returns impulse in LVLH Frame
         u = inv(R[1:3,1:3]) * u # Convert LVLH to ECI for simulation
         orbc.x[4:6] += u # Add impulse velocity to simulation velocity
         totalimpulse += norm(u)

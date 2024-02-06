@@ -8,12 +8,12 @@ function ECItoLVLH(state)
     r = state[1:3]
     v = state[4:6]
 
-    ir = r |> x -> x / norm(x)
-    ih = r × v |> x -> x / norm(x)
-    iv = ih × ir |> x -> x / norm(x)
-    T = [ir iv ih]
-    return [T zeros(3, 3)
-            zeros(3, 3) T]
+    ir = normalize(r)
+    ih = normalize(r × v) |> x->((!isnan).(x)).*x
+    iv = normalize(ih × ir) |> x->((!isnan).(x)).*x
+    R = [ir iv ih]
+    return [R zeros(3, 3)
+            zeros(3, 3) R]
 end
 
 begin
@@ -136,13 +136,21 @@ let orbc = orbc, orbt = orbt
     scatter!(ax, (trt[begin]-trc[begin])[1:3]...; label="Chaser",)
     scatter!(ax, zeros(3)...; label="Target")
     [Point3((t-c)[1:3]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax, x; color=range(0, 1, length(x)))
+    axislegend(ax)
 
     min_range = range(0, length(trc)/60, length(trc))
-    ax2 = Axis(f[2, 1], ylabel="Control Input", xlabel="Minutes")
-    reduce(hcat, effort) |> x -> series!(ax2, min_range, x; labels=["r" "v" "h"])
+    ax2 = Axis(f[2, 1], xlabel="Minutes", ylabel="Distance [m]")
+    ax2r = Axis(f[2, 1], xlabel="Minutes", ylabel="Velocity [m/s]", yaxisposition=:right)
+    [norm((t-c)[1:3]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax2, min_range, x; color=:red, label="position")
+    [norm((t-c)[4:6]) for (c, t) in zip(trc, trt)] |> x -> lines!(ax2r, min_range, x; color=:green, label="velocity")
+    axislegend(ax2, position=:lt)
+    axislegend(ax2r, position=:rt)
+    linkxaxes!(ax2, ax2r)
 
-    axislegend(ax)
-    axislegend(ax2)
+    ax3 = Axis(f[3, 1], ylabel="ΔV [m/s]", xlabel="Minutes")
+    reduce(hcat, effort) |> x -> series!(ax3, min_range, x; labels=["r" "v" "h"])
+    axislegend(ax3)
+
 
     #text!(0,0,text=string("ΔV = ", round(totalFiringTime;digits=2), "m/s"))
     @info string("ΔV = ", round(totalFiringTime;digits=2), "m/s")

@@ -13,7 +13,7 @@ begin
 
     # Define our constant parameters
     Δt = 1e0
-    num_time_steps = 2^10
+    num_time_steps = 2^9
     max_position = 1e4
     max_velocity = 1e1
     max_effort = 1e-1
@@ -39,7 +39,7 @@ begin
     @objective(model, Min, sum((effort[:, :]).^2))
 
     # Initial conditions:
-    @constraint(model, position[:, begin] .== [1e3, 1e3, 1e3])
+    @constraint(model, position[:, begin] .== [0e2, 2e2, 0e3])
     @constraint(model, velocity[:, begin] .== [0e0, 0e0, 0e0])
 
     # Final conditions:
@@ -50,9 +50,12 @@ JuMP.optimize!(model)
 
 using GLMakie
 let
-    fig = Figure(size=(1920, 1080))
+    f = Figure(; size=(900, 1200))
 
-    ax1 = Axis3(fig[:, :], perspectiveness=0.3, xlabel="x(LVLH) [m]", ylabel="y(LVLH) [m]", zlabel="z(LVLH) [m]")
+    ax1 = Axis3(f[:, :], perspectiveness=0.3, xlabel="R(LVLH) [m]", ylabel="V(LVLH) [m]", zlabel="H(LVLH) [m]")
+    xlims!(ax1, minimum(JuMP.value.(position)), maximum(JuMP.value.(position)))
+    ylims!(ax1, minimum(JuMP.value.(position)), maximum(JuMP.value.(position)))
+    zlims!(ax1, minimum(JuMP.value.(position)), maximum(JuMP.value.(position)))
 
     scatter!(ax1, [0,0,0]'; label="Target")
     scatter!(ax1, value.(position[:,begin])'; label="Chaser")
@@ -65,9 +68,22 @@ let
     axislegend(ax1)
 
     min_range = range(0, num_time_steps/60, num_time_steps)
-    ax2 = Axis(fig[2, 1]; ylabel="ΔV [m/s]", xlabel="Minutes")
-    JuMP.value.(effort) |> x -> series!(ax2, min_range, x; labels=["r" "v" "h"])
-    axislegend(ax2)
+    ax2 = Axis(f[2, 1], xlabel="Minutes", ylabel="Distance [m]")
+    ax2r = Axis(f[2, 1], xlabel="Minutes", ylabel="Velocity [m/s]", yaxisposition=:right)
+    JuMP.value.(position) |> eachcol .|> norm |> x->lines!(ax2, min_range, x; color=:red, label="Position")
+    JuMP.value.(velocity) |> eachcol .|> norm |> x->lines!(ax2r, min_range, x; color=:green, label="Velocity")
+    axislegend(ax2, position=:lt)
+    axislegend(ax2r, position=:rt)
+
+    ax3 = Axis(f[3, 1]; ylabel="ΔV [m/s]", xlabel="Minutes")
+    JuMP.value.(effort) |> x -> series!(ax3, min_range, x; labels=["r" "v" "h"])
+    axislegend(ax3, position=:lt)
     @info value.(effort) .|> abs |> sum
-    fig
+    f
+
+#    normed = eachcol(value.(effort)) .|> x->x/norm(x)
+#    normed = reduce(hcat, normed)
+#    dotprod = normed[:,begin]'*normed
+#    dotprod[:] .|> acos .|> rad2deg |> diff |> lines
+#    dotprod[:] .|> acos .|> rad2deg |> diff |> diff |> lines
 end
