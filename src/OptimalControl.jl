@@ -39,11 +39,11 @@ begin
     @objective(model, Min, sum((effort[:, :]).^2))
 
     # Initial conditions:
-    @constraint(model, position[:, begin] .== [0e2, 2e2, 0e3])
+    @constraint(model, position[:, begin] .== [0, 2e2, 0])
     @constraint(model, velocity[:, begin] .== [0e0, 0e0, 0e0])
 
     # Final conditions:
-    @constraint(model, position[:, end] .== [0e1, 1e1, 0e1])
+    @constraint(model, position[:, end] .== [0, 1e1, 0])
     @constraint(model, velocity[:, end] .== [0e0, 0e0, 0e0])
 end
 JuMP.optimize!(model)
@@ -81,9 +81,9 @@ let
     @info value.(effort) .|> abs |> sum
     f
 
-#    normed = eachcol(value.(effort)) .|> x->x/norm(x)
-#    normed = reduce(hcat, normed)
-#    dotprod = normed[:,begin]'*normed
+    normed = eachcol(value.(effort)) .|> x->x/norm(x)
+    normed = reduce(hcat, normed)
+    dotprod = normed[:,begin]'*normed
 #    dotprod[:] .|> acos .|> rad2deg |> diff |> lines
-#    dotprod[:] .|> acos .|> rad2deg |> diff |> diff |> lines
+    dotprod[:] .|> acos .|> rad2deg |> diff |> diff |> lines
 end
