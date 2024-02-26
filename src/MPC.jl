@@ -1,5 +1,6 @@
 begin
     using JuMP
+    using SCS
     using Ipopt
     using LinearAlgebra
     using GLMakie
@@ -18,73 +19,79 @@ function ECItoLVLH(state)
             zeros(3, 3) R]
 end
 
-function mpcGetEffort(initState::Vector, targetState::Vector)
-
+function dX(X, U)
     R_Earth = 6.3781363e6
     GM_Earth = 3.986004415e14
     a = R_Earth + 650e3
     n = √(GM_Earth / a^3)
 
+    A = [0 0 0 1 0 0
+         0 0 0 0 1 0
+         0 0 0 0 0 1
+         3*n^2 0 0 0 2*n 0
+         0 0 0 -2*n 0 0
+         0 0 -n^2 0 0 0]
+    B = [0 0 0
+         0 0 0
+         0 0 0
+         1 0 0
+         0 1 0
+         0 0 1]
+    return A*X + B*U
+end
+
+function mpcGetEffort(initState::Vector, targetState::Vector)
+
+    model = Model(SCS.Optimizer)
+    set_silent(model)
+    set_optimizer_attribute(model, "max_iters", 10)
+
     rel_pos = initState[1:3] - targetState[1:3] |> norm
     rel_vel = initState[4:6] - targetState[4:6] |> norm
 
-    model = Model(Ipopt.Optimizer)
-    set_silent(model)
-
-    # Define our constant parameters
-    num_time_steps = 10
-    max_position = 1e4
-    max_effort = 1e-1
-    max_velocity = min(sqrt(rel_pos*max_effort), 5) + 1e-1
-    Δt = rel_pos/(rel_vel+max_effort)
-    Δt /= num_time_steps
-
     # Define our decision variables
+    horizon = 10
     @variables model begin
-        -max_position <= position[1:3, 1:num_time_steps] <= max_position
-        -max_velocity <= velocity[1:3, 1:num_time_steps] <= max_velocity
-        -max_effort <= effort[1:3, 1:num_time_steps] <= max_effort
+        X[1:6, 1:horizon+1]
+        U[1:3, 1:horizon]
     end
 
-    # Initial conditions:
-    @constraint(model, position[:, begin] .== initState[1:3])
-    @constraint(model, velocity[:, begin] .== initState[4:6])
-
+    # Define our constant parameters
+    max_velocity = 5e0
+    dt = max(1e-0, rel_pos/(1e0*(horizon)))
+    max_effort = 1e-1*dt
     # Add dynamics constraints
-    @constraint(model, [i = 2:num_time_steps],
-                velocity[1, i] == velocity[1, i-1] + 3 * n^2 * position[1, i-1] + 2 * n * velocity[2, i-1]
-                + effort[1, i-1] * Δt
-               )
-    @constraint(model, [i = 2:num_time_steps],
-                velocity[2, i] == velocity[2, i-1] - 2 * n * velocity[1, i-1]
-                + effort[2, i-1] * Δt
-               )
-    @constraint(model, [i = 2:num_time_steps],
-                velocity[3, i] == velocity[3, i-1] - n^2 * position[3, i-1]
-                + effort[3, i-1] * Δt
-               )
-    @constraint(model, [i = 2:num_time_steps, j = 1:3],
-                position[j, i] == position[j, i-1] + velocity[j, i-1] * Δt
-               )
-#    @constraint(model, [i = 2:num_time_steps, j = 1:3],
-#                effort[j, i] .== effort[j, 1]
-#                )
-#    @constraint(model, [i = 2:num_time_steps, j = 1:3],
-#                -0.01 .<= (effort[j, i]-effort[j,i-1]) .<= 0.01
-#                )
+    for i = 1:horizon
+        k1 = dX(X[:, i], U[:, i])
+        k2 = dX(X[:, i] + 0.5*dt*k1, U[:, i])
+        k3 = dX(X[:, i] + 0.5*dt*k2, U[:, i])
+        k4 = dX(X[:, i] + dt*k3, U[:, i])
+        @constraint(model, X[:, i+1] .== X[:, i] + dt*(k1 + 2*k2 + 2*k3 + k4)/6)
+    end
+    @constraint(model, [i = 1:horizon],
+                -max_velocity .<= X[4:6, i] .<= max_velocity)
+    @constraint(model, [i = 1:horizon],
+                -max_effort .<= U[:, i] .<= max_effort)
 
-    # Cost function: minimize final position and final velocity
-    @objective(model, Min,
-               sum((position[:, end] - targetState[1:3]) .^ 2)
-               + sum((velocity[:, end] - targetState[4:6]) .^ 2)
-              )
+    # Initial conditions:
+    @constraint(model, X[:, begin] .== initState)
+    if rel_pos > 1e1
+        @constraint(model, X[:, end] .== targetState)
+        @objective(model, Min,
+                   sum(U[:, :].^2))
+    else
+        @objective(model, Min,
+                   sum(U[:, :].^2))
+    end
 
     JuMP.optimize!(model)
-    results = JuMP.value.(effort)
+    results = JuMP.value.(U)
     return results[:, begin]
 end
 
 begin
+    initialState = [0e3, 0.5e3, 0, 0, 0, 0]
+    targetState = [0, 1.0e3, 0, 0, 0, 0]
     epc0 = Epoch(2020, 1, 1, 0, 0, 0, 0.0)
     oe = [R_EARTH + 650e3, 0.0, 0.0, 0.0, 0.0, 0.0]
 
@@ -96,7 +103,7 @@ begin
               relativity=false)
     ecit = sOSCtoCART(oe, use_degrees=true)
     orbt = EarthInertialState(epc0, ecit; params...)
-    ecic = ecit - [1e3, 1e3, 1e3, 0e1, 0e1, 0e1]
+    ecic = ecit - initialState
     orbc = EarthInertialState(epc0, ecic; params...)
 
     function simStep!(orbc, orbt, dt=1.0) # Simulate both sats ahead by dt
@@ -118,14 +125,15 @@ let orbc = orbc, orbt = orbt
     ########################################
     # Simulation Loop
     ########################################
-    num_time_steps = 2^11
+    num_time_steps = 2^9
     for i = 1:num_time_steps
         # Generate Control input
         R = ECItoLVLH(orbt.x) # 6x6 Matrix for mapping ECI->LVLH
         lvlhc = -R * (orbt.x-orbc.x) # Position of chaser w.r.t. target in LVLH
         lvlht = zeros(6) # Target is always at origin
-        u = mpcGetEffort(lvlhc, lvlht-[0,50,0,0,0,0]) # Returns impulse in LVLH Frame
+        u = mpcGetEffort(lvlhc, lvlht-targetState) # Returns impulse in LVLH Frame
         u = inv(R[1:3,1:3]) * u # Convert LVLH to ECI for simulation
+        u = clamp.(u, -1e-1, 1e-1)
         orbc.x[4:6] += u # Add impulse velocity to simulation velocity
         totalimpulse += norm(u)
         push!(effort, u)
@@ -139,7 +147,7 @@ let orbc = orbc, orbt = orbt
     ########################################
     # Printing utility for simulation
     ########################################
-    f = Figure(; size=(900, 1200))
+    f = Figure(; size=(900, 600))
 
     ax = Axis3(f[:, :], perspectiveness=0.3, xlabel="R(LVLH) [m]", ylabel="V(LVLH) [m]", zlabel="H(LVLH) [m]")
     scatter!(ax, (trt[begin]-trc[begin])[1:3]...; label="Chaser",)
@@ -157,7 +165,6 @@ let orbc = orbc, orbt = orbt
     linkxaxes!(ax2, ax2r)
     #linkyaxes!(ax2, ax2r)
 
-    
     ax3 = Axis(f[3, 1], ylabel="ΔV [m/s]")
     reduce(hcat, effort) |> x -> series!(ax3, min_range, x; labels=["r" "v" "h"])
     axislegend(ax3)

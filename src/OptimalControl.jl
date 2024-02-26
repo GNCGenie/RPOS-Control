@@ -13,7 +13,7 @@ begin
 
     # Define our constant parameters
     Δt = 1e0
-    num_time_steps = 2^9
+    num_time_steps = 2400
     max_position = 1e4
     max_velocity = 1e1
     max_effort = 1e-1
@@ -33,24 +33,28 @@ begin
     @constraint(model, [i = 2:num_time_steps],
                 velocity[3, i] == velocity[3, i-1] - n^2*position[3,i-1] + effort[3, i-1] * Δt)
     @constraint(model, [i = 2:num_time_steps, j = 1:3],
-                position[j, i] == position[j, i-1] + velocity[j, i-1] * Δt + effort[j, i-1] * Δt^2 / 2)
+                position[j, i] == position[j, i-1] + velocity[j, i-1] * Δt) #  + effort[j, i-1] * Δt^2 / 2
 
     # Cost function: minimize final position and final velocity
-    @objective(model, Min, sum((effort[:, :]).^2))
+    @objective(model, Min, sum(effort[:, :].^2))
 
     # Initial conditions:
+#    @constraint(model, position[:, begin] .== [1e1, 0, 0])
+#    @constraint(model, position[:, begin] .== [0, 2.5e3, 0])
     @constraint(model, position[:, begin] .== [0, 2e2, 0])
     @constraint(model, velocity[:, begin] .== [0e0, 0e0, 0e0])
 
     # Final conditions:
+#    @constraint(model, position[:, end] .== [0, 2.5e3, 0])
+#    @constraint(model, position[:, end] .== [0, 2e2, 0])
     @constraint(model, position[:, end] .== [0, 1e1, 0])
     @constraint(model, velocity[:, end] .== [0e0, 0e0, 0e0])
 end
 JuMP.optimize!(model)
 
 using GLMakie
-let
-    f = Figure(; size=(900, 1200))
+begin
+    f = Figure()
 
     ax1 = Axis3(f[:, :], perspectiveness=0.3, xlabel="R(LVLH) [m]", ylabel="V(LVLH) [m]", zlabel="H(LVLH) [m]")
     xlims!(ax1, minimum(JuMP.value.(position)), maximum(JuMP.value.(position)))
@@ -67,7 +71,7 @@ let
             arrowcolor=strength, linecolor=strength)
     axislegend(ax1)
 
-    min_range = range(0, num_time_steps/60, num_time_steps)
+    min_range = Δt*range(0, num_time_steps/60, num_time_steps)
     ax2 = Axis(f[2, 1], xlabel="Minutes", ylabel="Distance [m]")
     ax2r = Axis(f[2, 1], xlabel="Minutes", ylabel="Velocity [m/s]", yaxisposition=:right)
     JuMP.value.(position) |> eachcol .|> norm |> x->lines!(ax2, min_range, x; color=:red, label="Position")
@@ -81,9 +85,9 @@ let
     @info value.(effort) .|> abs |> sum
     f
 
-    normed = eachcol(value.(effort)) .|> x->x/norm(x)
-    normed = reduce(hcat, normed)
-    dotprod = normed[:,begin]'*normed
-#    dotprod[:] .|> acos .|> rad2deg |> diff |> lines
-    dotprod[:] .|> acos .|> rad2deg |> diff |> diff |> lines
+    #   normed = eachcol(value.(effort)) .|> x->x/norm(x)
+    #   angle = [normed[begin]' * i for i in normed] .|> x->acos(x) .|> rad2deg
+    #   angle |> lines
+    #   angle |> diff |> lines
+    #    angle |> diff |> diff |> lines
 end
